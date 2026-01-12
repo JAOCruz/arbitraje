@@ -24,6 +24,8 @@ pub struct ArbitrageOpportunity {
     
     pub data_age_ms: u64,
     pub timestamp: u64,
+
+    pub created_at: u64, // Timestamp en milisegundos
 }
 
 #[derive(Clone, Copy)]
@@ -71,8 +73,8 @@ impl ArbitrageDetector {
         let symbols = self.aggregator.get_all_symbols();
         let now = chrono::Utc::now().timestamp_millis() as u64;
         
-        let max_age_ms = 2000; // Permitimos hasta 2s de latencia
-        let min_usd_profit = 0.02; // Bajamos un poco la vara para ver si funciona todo bien ($0.02)
+        let max_age_ms = 5000; // Permitimos hasta 2s de latencia
+        let min_usd_profit = 0.001; // Bajamos un poco la vara para ver si funciona todo bien ($0.02)
 
         for symbol in symbols {
             if let Some(books) = self.aggregator.get_books(&symbol) {
@@ -129,6 +131,7 @@ impl ArbitrageDetector {
                                     liquidity_bottleneck: if max_qty_buy < max_qty_sell { *exchange_buy } else { *exchange_sell },
                                     data_age_ms: max_age,
                                     timestamp: now,
+                                    created_at: now,
                                 });
                             }
                         }

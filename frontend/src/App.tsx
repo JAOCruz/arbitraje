@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { Activity, DollarSign, ArrowRight, AlertTriangle, Wifi, TrendingUp, Wallet, Zap, Trophy, History } from 'lucide-react'
+import { Activity, ArrowRight, Wifi, TrendingUp, Wallet, History, ShieldCheck, Zap, Info } from 'lucide-react'
 import clsx from 'clsx'
 
-// Interfaces actualizadas según el nuevo Backend Rust
 interface ArbitrageOpportunity {
   symbol: string;
   buy_exchange: string;
@@ -16,13 +15,17 @@ interface ArbitrageOpportunity {
   net_profit_usd: number;
   liquidity_bottleneck: string;
   timestamp: number;
+  data_age_ms: number;
 }
 
 interface SimStats {
-  balance: number;
-  total_profit: number;
+  total_usd: number;
+  binance_usd: number;
+  bybit_usd: number;
+  hyperliquid_usd: number;
+  extended_usd: number;
   trade_count: number;
-  last_trade: string;
+  last_action: string;
 }
 
 interface DashboardPayload {
@@ -32,184 +35,280 @@ interface DashboardPayload {
 
 function App() {
   const [opportunities, setOpportunities] = useState<ArbitrageOpportunity[]>([]);
-  const [stats, setStats] = useState<SimStats>({ balance: 10000, total_profit: 0, trade_count: 0, last_trade: "Esperando..." });
-  const [investment, setInvestment] = useState<number>(1000);
+  const [stats, setStats] = useState<SimStats>({ 
+    total_usd: 10000, binance_usd: 2500, bybit_usd: 2500, 
+    hyperliquid_usd: 2500, extended_usd: 2500, 
+    trade_count: 0, last_action: "Motor en espera..." 
+  });
   const [connected, setConnected] = useState(false);
   const [history, setHistory] = useState<{ time: string, balance: number }[]>([]);
+  const [frozenOps, setFrozenOps] = useState<ArbitrageOpportunity[]>([]);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
-    const ws = new WebSocket('ws://127.0.0.1:3030/ws');
-
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-
-    ws.onmessage = (event) => {
-      try {
-        // Parseamos el nuevo payload completo
-        const data: DashboardPayload = JSON.parse(event.data);
-        
-        // 1. Actualizar Oportunidades
-        const sorted = data.opportunities.sort((a, b) => b.net_profit_usd - a.net_profit_usd);
-        setOpportunities(sorted);
-
-        // 2. Actualizar Stats de Paper Trading
-        setStats(data.stats);
-
-        // 3. Historial del Balance (Para el gráfico)
-        setHistory(prev => {
-          const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second:'2-digit' });
-          // Solo añadimos punto si cambió el balance o cada cierto tiempo
-          if (prev.length > 0 && prev[prev.length - 1].balance === data.stats.balance && Math.random() > 0.1) return prev;
-          
-          return [...prev, { time: now, balance: data.stats.balance }].slice(-30);
-        });
-
-      } catch (e) {
-        console.error("Error parsing WS data", e);
-      }
+    const connect = () => {
+      const ws = new WebSocket('ws://127.0.0.1:3030/ws');
+      ws.onopen = () => setConnected(true);
+      ws.onclose = () => { setConnected(false); setTimeout(connect, 3000); };
+      ws.onmessage = (event) => {
+        try {
+          const data: DashboardPayload = JSON.parse(event.data);
+          if (data.stats) {
+            setStats(data.stats);
+            setOpportunities(data.opportunities || []);
+            setHistory(prev => {
+              const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              // Solo agregar al historial si el balance cambió o si es el primer punto
+              if (prev.length > 0 && prev[prev.length - 1].balance === data.stats.total_usd && prev.length > 1) return prev;
+              return [...prev, { time: now, balance: data.stats.total_usd }].slice(-50);
+            });
+          }
+        } catch (e) { console.error("WS Error:", e); }
+      };
     };
-
-    return () => ws.close();
+    connect();
   }, []);
 
-  return (
-    <div className="min-h-screen p-6 max-w-7xl mx-auto font-mono text-sm">
-      {/* HEADER */}
-      <header className="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-border pb-4 gap-4">
+  const handleMouseMove = (e: React.MouseEvent) => {
+    setMousePos({ x: e.clientX, y: e.clientY });
+  };
+
+  const toggleFreeze = (op: ArbitrageOpportunity) => {
+    const isAlreadyFrozen = frozenOps.some(f => f.symbol === op.symbol && f.buy_price === op.buy_price);
+    if (isAlreadyFrozen) {
+      setFrozenOps(prev => prev.filter(f => !(f.symbol === op.symbol && f.buy_price === op.buy_price)));
+    } else {
+      setFrozenOps(prev => [op, ...prev]);
+    }
+  };
+
+  const getOrderAge = (ts: number) => {
+    const diff = (Date.now() - ts) / 1000;
+    return diff < 0.8 ? "NEW" : `${diff.toFixed(1)}s`;
+  };
+
+  const FloatingAnalysis = ({ op }: { op: ArbitrageOpportunity }) => (
+    <div 
+      className="fixed z-[999] w-72 bg-[#0a0a0c] border border-primary/40 rounded-2xl p-6 shadow-[0_20px_50px_rgba(0,0,0,0.8)] pointer-events-none transition-opacity duration-200"
+      style={{ left: mousePos.x + 20, top: mousePos.y + 20 }}
+    >
+      <div className="flex items-center gap-2 mb-4 border-b border-white/10 pb-2">
+        <Zap size={14} className="text-primary" fill="currentColor" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-primary">Análisis Técnico</span>
+      </div>
+      <div className="space-y-4">
         <div>
-          <h1 className="text-3xl font-black flex items-center gap-3 text-primary tracking-tighter italic">
-            <Activity className="h-8 w-8" />
-            FLASH-ARB <span className="text-white not-italic text-lg font-normal opacity-50">PRO TERMINAL</span>
-          </h1>
+          <p className="text-[9px] text-gray-500 uppercase font-black tracking-widest">Fixed Node Capital</p>
+          <p className="text-base font-bold text-white">$2,500.00 USD</p>
         </div>
-        <div className="flex items-center gap-4">
-           {/* Indicador de Conexión */}
-          <div className={clsx("flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold transition-all", connected ? "bg-green-900/30 text-green-400 border border-green-900" : "bg-red-900/30 text-red-400 border border-red-900")}>
-            <Wifi className="h-3 w-3" />
-            {connected ? "LIVE FEED" : "OFFLINE"}
-          </div>
+        <div>
+          <p className="text-[9px] text-gray-500 uppercase font-black tracking-widest">Profit Proyectado</p>
+          <p className="text-base font-bold text-green-400">
+            +${((2500 / op.buy_price) * op.sell_price - 2500 - (2500 * (op.total_fees_pct/100))).toFixed(4)}
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 border-t border-white/5 pt-3">
+          <div><p className="text-[9px] text-gray-500 uppercase font-black">Feed Age</p><p className="text-xs font-bold text-blue-400">{getOrderAge(op.timestamp)}</p></div>
+          <div><p className="text-[9px] text-gray-500 uppercase font-black">Latency</p><p className="text-xs font-bold text-white">{op.data_age_ms}ms</p></div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen p-6 max-w-7xl mx-auto font-mono text-sm bg-[#050505] text-white" onMouseMove={handleMouseMove}>
+      {/* HEADER */}
+      <header className="flex justify-between items-center mb-6 border-b border-white/5 pb-4">
+        <h1 className="text-2xl font-black text-primary flex items-center gap-2 tracking-tighter italic">
+          <Activity className="h-6 w-6 text-primary" /> FLASH-ARB <span className="text-white not-italic opacity-40 text-sm tracking-normal">v2.0 PRO</span>
+        </h1>
+        <div className={clsx("px-4 py-1.5 rounded-full text-[10px] font-black border transition-all tracking-widest", 
+          connected ? "bg-green-500/10 text-green-400 border-green-500/30" : "bg-red-500/10 text-red-400 border-red-500/30")}>
+          <Wifi className="inline h-3 w-3 mr-2" /> {connected ? "TOKIO NODE: ONLINE" : "OFFLINE"}
         </div>
       </header>
 
-      {/* PAPER TRADING STATUS BAR */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-surface border border-border rounded-xl p-4 flex flex-col justify-center relative overflow-hidden group">
-             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Wallet size={40} /></div>
-             <span className="text-gray-400 text-xs uppercase font-bold">Balance Simulado</span>
-             <span className="text-2xl font-bold text-white">${stats.balance.toFixed(2)}</span>
-             <div className="text-xs text-green-500 font-bold">Inicial: $10,000.00</div>
+      {/* WALLETS CON ROI */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <div className="bg-[#0f0f11] border border-primary/30 p-5 rounded-2xl shadow-xl shadow-primary/5 relative overflow-hidden">
+          <div className="absolute -right-2 -top-2 opacity-5"><TrendingUp size={60} /></div>
+          <p className="text-[9px] text-primary font-black uppercase tracking-[0.2em] mb-1">Total Equity</p>
+          <p className="text-3xl font-black tracking-tighter">${stats.total_usd.toFixed(2)}</p>
+          <p className={clsx("text-[10px] font-bold mt-1", stats.total_usd >= 10000 ? "text-green-500" : "text-red-500")}>
+            ROI: {(((stats.total_usd - 10000) / 10000) * 100).toFixed(4)}%
+          </p>
+        </div>
+        {['Binance', 'Bybit', 'Hyperliquid', 'Extended'].map((name) => (
+          <div key={name} className="bg-[#0f0f11] border border-white/5 p-5 rounded-2xl">
+            <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-1">{name}</p>
+            <p className="text-xl font-bold tracking-tight">${(stats as any)[`${name.toLowerCase()}_usd`]?.toFixed(2)}</p>
+            <div className="h-1 w-full bg-white/5 mt-3 rounded-full overflow-hidden">
+              <div className="h-full bg-primary/40" style={{ width: `${((stats as any)[`${name.toLowerCase()}_usd`] / stats.total_usd) * 100}%` }} />
+            </div>
           </div>
-          
-          <div className="bg-surface border border-border rounded-xl p-4 flex flex-col justify-center relative overflow-hidden group">
-             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Trophy size={40} /></div>
-             <span className="text-gray-400 text-xs uppercase font-bold">Ganancia Total</span>
-             <span className={clsx("text-2xl font-bold", stats.total_profit >= 0 ? "text-primary" : "text-danger")}>
-                {stats.total_profit >= 0 ? "+" : ""}{stats.total_profit.toFixed(2)} USD
-             </span>
-          </div>
-
-          <div className="bg-surface border border-border rounded-xl p-4 flex flex-col justify-center relative overflow-hidden group">
-             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Zap size={40} /></div>
-             <span className="text-gray-400 text-xs uppercase font-bold">Trades Ejecutados</span>
-             <span className="text-2xl font-bold text-white">{stats.trade_count}</span>
-             <div className="text-xs text-blue-400 font-bold">Auto-Execution: ON</div>
-          </div>
-
-          <div className="bg-surface border border-border rounded-xl p-4 flex flex-col justify-center relative overflow-hidden group">
-             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><History size={40} /></div>
-             <span className="text-gray-400 text-xs uppercase font-bold">Última Acción</span>
-             <span className="text-sm font-bold text-white truncate" title={stats.last_trade}>{stats.last_trade}</span>
-          </div>
+        ))}
       </div>
 
-      {/* GRID PRINCIPAL */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* COLUMNA IZQUIERDA: Oportunidades */}
-        <div className="lg:col-span-2 space-y-4">
-          <h2 className="text-lg font-bold flex items-center gap-2 mb-4 text-white uppercase tracking-wider">
-            <DollarSign className="text-primary h-5 w-5" /> Mercado en Tiempo Real
-          </h2>
+      {/* SYSTEM LOG BAR RE-AGREGADA */}
+      <div className="mb-8 px-4 py-2.5 bg-[#0f0f11] border border-white/5 rounded-xl flex justify-between items-center text-[11px] shadow-lg">
+        <div className="flex items-center gap-3 text-gray-400">
+          <History size={14} className="text-accent" /> 
+          <span className="font-black uppercase tracking-widest text-[9px] opacity-50">Last Action:</span> 
+          <span className="text-white font-bold uppercase">{stats.last_action}</span>
+        </div>
+        <div className="flex items-center gap-8">
+          <span className="flex items-center gap-1.5 text-green-500 font-black tracking-widest">
+            <ShieldCheck size={14}/> VWAP ACTIVE
+          </span>
+          <span className="text-gray-500 font-black tracking-widest uppercase">
+            Trades Executed: <span className="text-white ml-1">{stats.trade_count}</span>
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+        <div className="lg:col-span-2 space-y-6">
           
+          {/* MÚLTIPLES SNAPSHOTS CON DATA COMPLETA */}
+          {frozenOps.length > 0 && (
+            <div className="space-y-6 mb-12">
+               <h2 className="text-[10px] font-black uppercase tracking-[0.5em] text-blue-500 mb-4 flex items-center gap-2">
+                 <ShieldCheck size={14} /> Snapshots Bloqueados ({frozenOps.length})
+               </h2>
+               {frozenOps.map((op, i) => (
+                 <div key={`frozen-${i}`} className="bg-blue-500/5 border-2 border-blue-500/40 rounded-[1.5rem] p-8 relative group transition-all hover:bg-blue-500/10 cursor-default overflow-hidden shadow-2xl">
+                    <div className="opacity-0 group-hover:opacity-100"><FloatingAnalysis op={op} /></div>
+                    <button onClick={() => toggleFreeze(op)} className="absolute top-4 right-6 bg-blue-500 text-white px-3 py-1 rounded-lg text-[10px] font-black z-[110] hover:scale-105 active:scale-95 transition-all">✕ LIBERAR</button>
+                    
+                    <div className="flex justify-between items-start mb-10 relative z-10">
+                      <div className="flex items-center gap-8">
+                        <h3 className="text-4xl font-black text-white tracking-tighter italic">{op.symbol}</h3>
+                        <div className="h-10 w-[1px] bg-blue-500/20" />
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest text-blue-400">
+                            <span>{op.buy_exchange}</span>
+                            <ArrowRight size={12} />
+                            <span>{op.sell_exchange}</span>
+                          </div>
+                          <span className="text-[9px] text-gray-500 font-bold uppercase">Static Snapshot</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-5xl font-black text-white tracking-tighter leading-none">${op.net_profit_usd.toFixed(4)}</p>
+                        <p className="text-[10px] font-black text-gray-600 mt-2 uppercase tracking-widest">Profit Capturado</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-12 pt-10 border-t border-blue-500/20 relative z-10">
+                      <div className="space-y-2"><span className="text-[10px] text-gray-600 font-black uppercase tracking-widest block">Entry</span><span className="text-xl font-bold text-white tracking-tighter">${op.buy_price.toFixed(4)}</span></div>
+                      <div className="space-y-2"><span className="text-[10px] text-gray-600 font-black uppercase tracking-widest block">Exit</span><span className="text-xl font-bold text-white tracking-tighter">${op.sell_price.toFixed(4)}</span></div>
+                      <div className="space-y-2"><span className="text-[10px] text-gray-600 font-black uppercase tracking-widest block font-bold">Spread</span><span className="text-xl font-bold text-yellow-500 tracking-tighter">{op.spread_pct.toFixed(3)}%</span></div>
+                      <div className="space-y-2 text-right"><span className="text-[10px] text-gray-600 font-black uppercase tracking-widest block">Liquidity</span><span className="text-xl font-bold text-white/90 tracking-tighter">${op.max_tradeable_usd.toLocaleString()}</span></div>
+                    </div>
+                 </div>
+               ))}
+            </div>
+          )}
+
+          <h2 className="text-[10px] font-black uppercase tracking-[0.5em] text-white/20 mb-6 flex items-center gap-4">
+             <div className="h-[1px] w-12 bg-white/10" /> Arbitrage Live Feed
+          </h2>
+
           {opportunities.length === 0 ? (
-            <div className="p-12 text-center border border-dashed border-border rounded-xl text-gray-500 bg-surface/50">
-              Escaneando exchanges...
+            <div className="h-80 border border-dashed border-white/5 rounded-[2rem] flex flex-col items-center justify-center text-gray-700 gap-6">
+              <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+              <p className="tracking-[0.3em] text-[10px] uppercase font-black italic">Escaneando Mercado...</p>
             </div>
           ) : (
-            opportunities.map((op, idx) => {
-              const realInvestment = Math.min(investment, op.max_tradeable_usd);
-              const grossProfit = realInvestment * (op.spread_pct / 100);
-              const fees = realInvestment * (op.total_fees_pct / 100);
-              const netProfit = grossProfit - fees;
-              const roi = (netProfit / realInvestment) * 100;
+            opportunities.map((op, i) => (
+              <div key={i} onClick={() => toggleFreeze(op)} className="bg-[#0f0f11] border border-white/5 rounded-[1.5rem] p-8 hover:border-primary transition-all group relative cursor-pointer overflow-hidden shadow-lg hover:shadow-primary/5">
+                <div className="opacity-0 group-hover:opacity-100"><FloatingAnalysis op={op} /></div>
 
-              return (
-                <div key={idx} className="bg-surface border border-border rounded-xl p-5 hover:border-primary transition-all duration-300 relative overflow-hidden shadow-lg group">
-                   {netProfit > 0 && <div className="absolute left-0 top-0 w-1 h-full bg-primary" />}
-                  
-                  <div className="flex justify-between items-start relative z-10">
-                    <div>
-                      <h3 className="text-2xl font-black text-white flex items-center gap-2 tracking-tight">
-                        {op.symbol}
-                      </h3>
-                      <div className="flex items-center gap-2 mt-2 text-xs font-bold uppercase tracking-wider">
+                <div className="flex justify-between items-start mb-10 relative z-10">
+                  <div className="flex items-center gap-8">
+                    <h3 className="text-4xl font-black text-white tracking-tighter italic">{op.symbol}</h3>
+                    <div className="h-10 w-[1px] bg-white/10" />
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest text-gray-500">
                         <span className="text-blue-400">{op.buy_exchange}</span>
-                        <ArrowRight className="h-3 w-3 text-gray-600" />
+                        <ArrowRight size={12} className="text-gray-700" />
                         <span className="text-purple-400">{op.sell_exchange}</span>
                       </div>
-                    </div>
-
-                    <div className="text-right">
-                      <div className={clsx("text-3xl font-black tracking-tighter", netProfit > 0 ? "text-primary" : "text-danger")}>
-                        {netProfit > 0 ? "+" : ""}{netProfit.toFixed(4)} <span className="text-sm text-gray-500 font-normal">USD</span>
-                      </div>
-                      <div className={clsx("text-xs font-bold mt-1", netProfit > 0 ? "text-green-700" : "text-red-800")}>
-                        ROI ESTIMADO: {roi.toFixed(3)}%
-                      </div>
+                      <span className="text-[9px] text-blue-500 font-bold uppercase">{getOrderAge(op.timestamp)}</span>
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-border/50 text-xs text-gray-400">
-                    <div>PRECIO COMPRA: <span className="text-white">${op.buy_price.toFixed(4)}</span></div>
-                    <div>PRECIO VENTA: <span className="text-white">${op.sell_price.toFixed(4)}</span></div>
-                    <div>SPREAD: <span className="text-yellow-500">{op.spread_pct.toFixed(2)}%</span></div>
-                    <div>LIQUIDEZ: <span className="text-white">${op.max_tradeable_usd.toFixed(0)}</span></div>
+                  <div className="text-right">
+                    <p className="text-5xl font-black text-primary tracking-tighter leading-none">+${op.net_profit_usd.toFixed(4)}</p>
+                    <p className="text-[10px] font-black text-gray-600 mt-2 uppercase tracking-widest italic leading-none">Est. Net Profit</p>
                   </div>
                 </div>
-              );
-            })
+
+                <div className="grid grid-cols-4 gap-12 pt-10 border-t border-white/5 relative z-10">
+                  <div className="space-y-2"><span className="text-[10px] text-gray-600 font-black uppercase tracking-widest block font-bold">Entry</span><span className="text-xl font-bold text-white tracking-tighter">${op.buy_price.toFixed(4)}</span></div>
+                  <div className="space-y-2"><span className="text-[10px] text-gray-600 font-black uppercase tracking-widest block font-bold">Exit</span><span className="text-xl font-bold text-white tracking-tighter">${op.sell_price.toFixed(4)}</span></div>
+                  <div className="space-y-2"><span className="text-[10px] text-gray-600 font-black uppercase tracking-widest block font-bold">Spread</span><span className="text-xl font-bold text-yellow-500 tracking-tighter">{op.spread_pct.toFixed(3)}%</span></div>
+                  <div className="space-y-2 text-right"><span className="text-[10px] text-gray-600 font-black uppercase tracking-widest block font-bold">Volume</span><span className="text-xl font-bold text-white/90 tracking-tighter">${op.max_tradeable_usd.toLocaleString()}</span></div>
+                </div>
+              </div>
+            ))
           )}
         </div>
 
-        {/* COLUMNA DERECHA: Gráfico de Balance */}
-        <div className="space-y-6">
-          <div className="bg-surface border border-border rounded-xl p-5 h-80 flex flex-col shadow-lg">
-             <h3 className="text-xs font-bold text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-widest">
-                <TrendingUp className="h-4 w-4" /> Crecimiento del Portafolio
-             </h3>
-             <div className="flex-1 w-full min-h-0">
-               <ResponsiveContainer width="100%" height="100%">
-                 <LineChart data={history}>
-                   <Tooltip 
-                     contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a' }}
-                     itemStyle={{ color: '#22c55e' }}
-                   />
-                   <XAxis dataKey="time" hide />
-                   <YAxis domain={['auto', 'auto']} stroke="#444" tick={{fontSize: 10}} />
-                   <Line type="stepAfter" dataKey="balance" stroke="#22c55e" strokeWidth={2} dot={false} />
-                 </LineChart>
-               </ResponsiveContainer>
+        {/* SIDEBAR: CHART & ENGINE LOGIC */}
+        <div className="space-y-10">
+          <div className="bg-[#0f0f11] border border-white/5 rounded-[2rem] p-10 h-96 shadow-2xl">
+             <h3 className="text-[10px] font-black text-gray-600 uppercase tracking-[0.3em] mb-10 italic">Portfolio Performance</h3>
+             <div className="h-[220px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={history}>
+                    <Line type="stepAfter" dataKey="balance" stroke="#22c55e" strokeWidth={4} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
              </div>
+             <p className="mt-4 text-[9px] text-gray-500 text-center uppercase tracking-widest italic leading-relaxed">
+               La curva se expande automáticamente con cada ejecución detectada.
+             </p>
           </div>
-          
-          <div className="p-4 bg-blue-900/10 border border-blue-900/30 rounded-xl text-xs text-blue-300">
-             <strong>⚠️ MODO SIMULACIÓN ACTIVO</strong>
-             <p className="mt-1 opacity-70">El bot está "operando" con una billetera virtual de $10,000. Los trades se registran automáticamente cuando el ROI supera el 0.01%.</p>
+
+          <div className="bg-[#0f0f11] border border-white/5 rounded-[2rem] p-10 shadow-2xl relative overflow-hidden group">
+            <div className="flex items-center gap-3 mb-10 border-b border-white/5 pb-6">
+               <ShieldCheck className="text-accent" size={20} />
+               <h3 className="text-xs font-black uppercase tracking-[0.2em] italic text-white">Engine Logic v2.0</h3>
+            </div>
+            
+            <div className="space-y-10 text-[11px] leading-relaxed">
+              <div className="flex gap-6 group">
+                 <div className="h-12 w-12 shrink-0 bg-accent/10 rounded-2xl flex items-center justify-center text-accent border border-accent/20 group-hover:bg-accent group-hover:text-black transition-all duration-300">
+                    <Wallet size={20} />
+                 </div>
+                 <div className="space-y-2 pt-1">
+                    <p className="text-white font-black uppercase text-[10px] tracking-widest leading-none">Isolated Wallets</p>
+                    <p className="text-gray-500 font-medium leading-normal">Balances segregados por nodo ($2.5k c/u). Gestión de riesgo aislada.</p>
+                 </div>
+              </div>
+              <div className="flex gap-6 group">
+                 <div className="h-12 w-12 shrink-0 bg-primary/10 rounded-2xl flex items-center justify-center text-primary border border-primary/20 group-hover:bg-primary group-hover:text-black transition-all duration-300">
+                    <Zap size={20} />
+                 </div>
+                 <div className="space-y-2 pt-1">
+                    <p className="text-white font-black uppercase text-[10px] tracking-widest leading-none">VWAP Pricing</p>
+                    <p className="text-gray-500 font-medium leading-normal">Simulación de impacto en Order Book. Precio dinámico por volumen.</p>
+                 </div>
+              </div>
+              <div className="flex gap-6 group">
+                 <div className="h-12 w-12 shrink-0 bg-yellow-500/10 rounded-2xl flex items-center justify-center text-yellow-500 border border-yellow-500/20 group-hover:bg-yellow-500 group-hover:text-black transition-all duration-300">
+                    <ShieldCheck size={20} />
+                 </div>
+                 <div className="space-y-2 pt-1">
+                    <p className="text-white font-black uppercase text-[10px] tracking-widest leading-none">Anti-Latency</p>
+                    <p className="text-gray-500 font-medium leading-normal">Solo se procesan datos bajo el umbral de ejecución configurado.</p>
+                 </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

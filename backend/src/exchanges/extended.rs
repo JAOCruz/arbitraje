@@ -3,9 +3,12 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde_json::Value;
-use tokio::sync::mpsc;
+// CORRECCIÓN: Importaciones separadas para mpsc y broadcast
+use tokio::sync::{mpsc, broadcast}; 
 use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest, tungstenite::Message};
 use http::HeaderValue;
+use tracing::{info, warn, error};
+use std::time::Duration;
 
 pub struct ExtendedConnector {
     tx: Option<mpsc::Sender<BookUpdate>>,
@@ -19,8 +22,6 @@ impl ExtendedConnector {
     }
 
     fn normalize_symbol(symbol: &str) -> String {
-        // La documentación muestra ejemplos como "BTC-USD".
-        // Si tu bot usa "BTC-USDT", lo convertimos.
         if symbol.ends_with("USDT") {
             symbol.replace("USDT", "USD")
         } else {
@@ -43,61 +44,44 @@ impl ExchangeConnector for ExtendedConnector {
             let tx = tx_base.clone();
             let safe_symbol = symbol.clone();
 
-            // CONSTRUCCIÓN DE LA URL BASADA EN LA DOCS
-            // Formato: wss://api.starknet.extended.exchange/stream.extended.exchange/v1/orderbooks/{market}?depth=1
             let url_str = format!(
                 "wss://api.starknet.extended.exchange/stream.extended.exchange/v1/orderbooks/{}?depth=1",
                 market
             );
 
+            // Bucle de reconexión dentro del spawn
             tokio::spawn(async move {
-                // 1. Crear request con User-Agent (Para evitar el WAF 403/404)
-                let mut request = match url_str.into_client_request() {
-                    Ok(req) => req,
-                    Err(e) => {
-                        tracing::error!("❌ Error URL Extended: {:?}", e);
-                        return;
-                    }
-                };
+                loop {
+                    let mut request = match url_str.clone().into_client_request() {
+                        Ok(req) => req,
+                        Err(_) => break,
+                    };
 
-                let headers = request.headers_mut();
-                headers.insert("User-Agent", HeaderValue::from_static("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"));
-                headers.insert("Origin", HeaderValue::from_static("https://app.extended.exchange"));
+                    request.headers_mut().insert("User-Agent", HeaderValue::from_static("Mozilla/5.0..."));
+                    
+                    info!("🔌 Connecting to Extended: {}", safe_symbol);
 
-                tracing::info!("🔌 Connecting to Extended Stream ({})", safe_symbol);
-
-                match connect_async(request).await {
-                    Ok((ws_stream, _)) => {
-                        tracing::info!("✅ Connected to Extended for {}", safe_symbol);
+                    if let Ok((ws_stream, _)) = connect_async(request).await {
                         let (_, mut read) = ws_stream.split();
-
-                        // En este modelo NO enviamos mensaje de suscripción.
-                        // La conexión a la URL ES la suscripción.
-
                         while let Some(msg) = read.next().await {
                             if let Ok(Message::Text(text)) = msg {
-                                // Parseo según la documentación proveída:
-                                // { "data": { "b": [{"p": "...", "q": "..."}], "a": [...] }, "ts": ... }
                                 if let Ok(json) = serde_json::from_str::<Value>(&text) {
-                                    
-                                    // Validamos que tenga data
                                     if let Some(data) = json.get("data") {
-                                        // Extraemos timestamp del nivel raíz o usamos actual
                                         let ts = json.get("ts").and_then(|t| t.as_u64()).unwrap_or(0);
-
-                                        let bids = data.get("b"); // Array de bids
-                                        let asks = data.get("a"); // Array de asks
-
-                                        // Helper para sacar (precio, cantidad) del primer elemento del array
+                                        let bids = data.get("b");
+                                        let asks = data.get("a");
+                                    
+                                        // Función interna para extraer el mejor precio
                                         let get_top = |list: Option<&Value>| -> Option<(f64, f64)> {
                                             let items = list?.as_array()?;
-                                            let top = items.get(0)?; // Mejor precio (depth=1)
+                                            let top = items.get(0)?;
                                             let p = top.get("p")?.as_str()?.parse::<f64>().ok()?;
                                             let q = top.get("q")?.as_str()?.parse::<f64>().ok()?;
                                             Some((p, q))
                                         };
-
+                                    
                                         if let (Some((bid, bid_sz)), Some((ask, ask_sz))) = (get_top(bids), get_top(asks)) {
+                                            // ESTA ES LA LÍNEA QUE FALTA O ESTÁ FALLANDO:
                                             let _ = tx.send(BookUpdate {
                                                 symbol: safe_symbol.clone(),
                                                 exchange: Exchange::Extended,
@@ -106,24 +90,17 @@ impl ExchangeConnector for ExtendedConnector {
                                                 bid_size: bid_sz,
                                                 ask_size: ask_sz,
                                                 timestamp: ts,
-                                            }).await;
+                                            }).await; 
                                         }
                                     }
                                 }
                             }
                         }
-                        tracing::warn!("⚠️ Extended stream ended for {}", safe_symbol);
+                        warn!("⚠️ Connection lost for {}. Retrying...", safe_symbol);
                     }
-                    Err(e) => {
-                        tracing::error!("❌ Extended Connection Failed ({}) - Check URL/Symbol: {:?}", safe_symbol, e);
-                    }
+                    tokio::time::sleep(Duration::from_secs(5)).await;
                 }
-                // Pausa antes de reconectar si falla
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             });
-            
-            // Scaled connection start to avoid rate limits
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
         Ok(())
     }

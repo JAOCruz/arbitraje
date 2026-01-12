@@ -28,7 +28,6 @@ impl Exchange {
     }
 }
 
-// Lo demás se queda igual
 #[derive(Debug, Clone)]
 pub struct BookUpdate {
     pub symbol: String,
