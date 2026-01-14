@@ -29,3 +29,5 @@ url = "2.2"
 # Estructuras de datos
 dashmap = "5.5"
 chrono = "0.4"
+
+dotenv = "0.15"

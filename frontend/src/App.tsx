@@ -3,6 +3,14 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 import { Activity, ArrowRight, Wifi, TrendingUp, Wallet, History, ShieldCheck, Zap, Info } from 'lucide-react'
 import clsx from 'clsx'
 
+interface Trade {
+  timestamp: string;
+  symbol: string;
+  buy_exchange: string;
+  sell_exchange: string;
+  profit_usd: number;
+}
+
 interface ArbitrageOpportunity {
   symbol: string;
   buy_exchange: string;
@@ -31,10 +39,48 @@ interface SimStats {
 interface DashboardPayload {
   opportunities: ArbitrageOpportunity[];
   stats: SimStats;
+  recent_trades: Trade[];
 }
+
+const TradeHistory = ({ trades }: { trades: Trade[] }) => (
+  <div className="bg-[#0f0f11] border border-white/5 rounded-[2rem] p-8 shadow-2xl relative overflow-hidden h-[500px] flex flex-col">
+    <div className="flex justify-between items-center mb-6 border-b border-white/5 pb-4">
+      <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-400 flex items-center gap-2">
+        <History size={14} className="text-primary" /> Live Execution Log
+      </h3>
+      <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
+    </div>
+    
+    <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar flex-1">
+      {trades.length === 0 ? (
+        <p className="text-[10px] text-gray-600 italic text-center mt-10 uppercase tracking-widest">Waiting for first execution...</p>
+      ) : (
+        trades.map((trade, i) => (
+          <div key={i} className="flex flex-col p-4 bg-white/[0.02] border border-white/5 rounded-2xl hover:bg-white/[0.04] transition-all group">
+            <div className="flex justify-between items-start mb-2">
+              <span className="font-mono text-[10px] text-gray-500 uppercase">{trade.timestamp}</span>
+              <span className="text-[11px] font-black text-green-400 group-hover:scale-110 transition-transform">
+                +${trade.profit_usd.toFixed(4)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-black italic tracking-tighter text-white">{trade.symbol}</span>
+              <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-500">
+                <span className="text-blue-400">{trade.buy_exchange}</span>
+                <ArrowRight size={10} />
+                <span className="text-purple-400">{trade.sell_exchange}</span>
+              </div>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  </div>
+);
 
 function App() {
   const [opportunities, setOpportunities] = useState<ArbitrageOpportunity[]>([]);
+  const [recentTrades, setRecentTrades] = useState<Trade[]>([]);
   const [stats, setStats] = useState<SimStats>({ 
     total_usd: 10000, binance_usd: 2500, bybit_usd: 2500, 
     hyperliquid_usd: 2500, extended_usd: 2500, 
@@ -47,7 +93,7 @@ function App() {
 
   useEffect(() => {
     const connect = () => {
-      const ws = new WebSocket('ws://127.0.0.1:3030/ws');
+      const ws = new WebSocket('ws://13.158.22.50:3030/ws');
       ws.onopen = () => setConnected(true);
       ws.onclose = () => { setConnected(false); setTimeout(connect, 3000); };
       ws.onmessage = (event) => {
@@ -56,6 +102,7 @@ function App() {
           if (data.stats) {
             setStats(data.stats);
             setOpportunities(data.opportunities || []);
+            setRecentTrades(data.recent_trades || []);
             setHistory(prev => {
               const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
               // Solo agregar al historial si el balance cambió o si es el primer punto
@@ -254,7 +301,9 @@ function App() {
         </div>
 
         {/* SIDEBAR: CHART & ENGINE LOGIC */}
-        <div className="space-y-10">
+        <div className="space-y-10">          
+          {/* 3. Colocamos el nuevo componente aquí */}
+          <TradeHistory trades={recentTrades} />
           <div className="bg-[#0f0f11] border border-white/5 rounded-[2rem] p-10 h-96 shadow-2xl">
              <h3 className="text-[10px] font-black text-gray-600 uppercase tracking-[0.3em] mb-10 italic">Portfolio Performance</h3>
              <div className="h-[220px]">
