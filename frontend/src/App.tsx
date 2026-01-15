@@ -56,27 +56,30 @@ const TradeHistory = ({ trades }: { trades: Trade[] }) => (
         <p className="text-[10px] text-gray-600 italic text-center mt-10 uppercase tracking-widest">Waiting for first execution...</p>
       ) : (
         trades.map((trade, i) => (
-          <div key={i} className="flex flex-col p-4 bg-white/[0.02] border border-white/5 rounded-2xl hover:bg-white/[0.04] transition-all group">
-            <div className="flex justify-between items-start mb-2">
-              <span className="font-mono text-[10px] text-gray-500 uppercase">{trade.timestamp}</span>
-              <span className="text-[11px] font-black text-green-400 group-hover:scale-110 transition-transform">
-                +${trade.profit_usd.toFixed(4)}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-black italic tracking-tighter text-white">{trade.symbol}</span>
-              <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-500">
-                <span className="text-blue-400">{trade.buy_exchange}</span>
-                <ArrowRight size={10} />
-                <span className="text-purple-400">{trade.sell_exchange}</span>
-              </div>
-            </div>
+      <div key={i} className="flex flex-col p-4 bg-white/[0.02] border border-white/5 rounded-2xl hover:bg-white/[0.04] transition-all group">
+        <div className="flex justify-between items-start mb-2">
+          <span className="font-mono text-[10px] text-gray-500 uppercase">{trade.timestamp}</span>
+          <span className="text-[11px] font-black text-green-400 group-hover:scale-110 transition-transform">
+            +${trade.profit_usd?.toFixed(4) || "0.0000"}
+          </span>
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-sm font-black italic tracking-tighter text-white">{trade.symbol}</span>
+          <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-500">
+            {/* CAMBIO AQUÍ: long_ex y short_ex */}
+            <span className="text-blue-400">{trade.long_ex}</span> 
+            <ArrowRight size={10} />
+            <span className="text-purple-400">{trade.short_ex}</span>
           </div>
-        ))
-      )}
-    </div>
-  </div>
-);
+        </div>
+        {/* Opcional: Mostrar el apalancamiento */}
+        <div className="text-[8px] text-gray-600 mt-1 uppercase font-bold">
+          {trade.leverage}x Leverage
+        </div>
+      </div>
+    ))
+  )}
+</div>
 
 function App() {
   const [opportunities, setOpportunities] = useState<ArbitrageOpportunity[]>([]);

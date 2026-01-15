@@ -1,6 +1,7 @@
 # Rust / Cargo
 /backend/target/
 **/*.rs.bk
+/backend/.env
 
 # Node / Frontend
 /frontend/node_modules/
@@ -12,3 +13,4 @@ backend/trades_log.csv
 
 # Archivos de sistema
 .DS_Store
+
