@@ -84,12 +84,14 @@ const TradeHistory = ({ trades }: { trades: Trade[] }) => (
   </div>
 );
 
+const INITIAL_CAPITAL = 44.97;
+
 function App() {
   const [opportunities, setOpportunities] = useState<ArbitrageOpportunity[]>([]);
   const [recentTrades, setRecentTrades] = useState<Trade[]>([]);
   const [stats, setStats] = useState<SimStats>({ 
-    total_usd: 10000, binance_usd: 2500, bybit_usd: 2500, 
-    hyperliquid_usd: 2500, extended_usd: 2500, 
+    total_usd: INITIAL_CAPITAL, binance_usd: 20, bybit_usd: 0.0, 
+    hyperliquid_usd: 0.0, extended_usd: 24, 
     trade_count: 0, last_action: "Motor en espera..." 
   });
   const [connected, setConnected] = useState(false);
@@ -187,8 +189,8 @@ function App() {
           <div className="absolute -right-2 -top-2 opacity-5"><TrendingUp size={60} /></div>
           <p className="text-[9px] text-primary font-black uppercase tracking-[0.2em] mb-1">Total Equity</p>
           <p className="text-3xl font-black tracking-tighter">${stats.total_usd.toFixed(2)}</p>
-          <p className={clsx("text-[10px] font-bold mt-1", stats.total_usd >= 10000 ? "text-green-500" : "text-red-500")}>
-            ROI: {(((stats.total_usd - 10000) / 10000) * 100).toFixed(4)}%
+          <p className={clsx("text-[10px] font-bold mt-1", stats.total_usd >= INITIAL_CAPITAL ? "text-green-500" : "text-red-500")}>
+            ROI: {(((stats.total_usd - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100).toFixed(4)}%
           </p>
         </div>
         {['Binance', 'Bybit', 'Hyperliquid', 'Extended'].map((name) => (
