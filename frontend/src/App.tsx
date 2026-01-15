@@ -40,7 +40,7 @@ interface SimStats {
 interface DashboardPayload {
   opportunities: ArbitrageOpportunity[];
   stats: SimStats;
-  recent_trades: Trade[];
+  last_trades: Trade[];
 }
 
 const TradeHistory = ({ trades }: { trades: Trade[] }) => (
@@ -108,7 +108,7 @@ function App() {
           if (data.stats) {
             setStats(data.stats);
             setOpportunities(data.opportunities || []);
-            setRecentTrades(data.recent_trades || []);
+            setRecentTrades(data.last_trades || []);
             setHistory(prev => {
               const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
               // Solo agregar al historial si el balance cambió o si es el primer punto
